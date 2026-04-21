@@ -1,6 +1,8 @@
 # Progressive Illumination-aware Transformer for Retinex-based Low-Light Image
 
-This repository contains the official implementation of the manuscript **Progressive Illumination-aware Transformer for Retinex-based Low-Light Image Enhancement**. It provides the final RPIFormer model, training and testing configurations, and the evaluation script used in our experiments.
+This repository contains the official implementation of the manuscript **Progressive Illumination-aware Transformer for Retinex-based Low-Light Image Enhancement**. It includes the final RPIFormer model, the training and testing configurations, and the evaluation script used in our experiments.
+
+This manuscript is currently under submission to **The Visual Computer (TVC)**.
 
 ![Framework](framework.png)
 
