@@ -1,0 +1,397 @@
+import logging
+import os
+import torch
+from collections import OrderedDict
+from copy import deepcopy
+from torch.nn.parallel import DataParallel, DistributedDataParallel
+
+from basicsr.models import lr_scheduler as lr_scheduler
+from basicsr.utils.dist_util import master_only
+
+"""
+    定义了所有模型的基类 BaseModel
+    为具体模型的实现提供了通用的接口和工具方法，主要用于训练、验证、保存、加载、分布式训练等通用操作。
+    具体的模型（如图像增强、去噪等）会继承这个基类，并实现自己的细节。
+"""
+logger = logging.getLogger('basicsr')
+
+
+class BaseModel():
+    """ 所有模型类的基类，定义了训练、验证、保存、加载等通用功能 """
+
+    def __init__(self, opt):
+        self.opt = opt
+        self.device = torch.device('cuda' if opt['num_gpu'] != 0 else 'cpu')
+        self.is_train = opt['is_train']
+        self.schedulers = []
+        self.optimizers = []
+
+    def feed_data(self, data):
+        """ 输入数据的方法，子类中重写 """
+        pass
+
+    def optimize_parameters(self):
+        """ 优化网络的方法，子类中实现 """
+        pass
+
+    def get_current_visuals(self):
+        """ 获取当前可视化输出 """
+        pass
+
+    def save(self, epoch, current_iter):
+        """ 保存网络和训练状态 """
+        pass
+
+    def validation(self, dataloader, current_iter, tb_logger, save_img=False, rgb2bgr=True, use_image=True):
+        """ 验证功能
+
+        Args:
+            dataloader (torch.utils.data.DataLoader): 验证用的数据加载器
+            current_iter (int): 当前的迭代次数
+            tb_logger (tensorboard logger): 用于记录训练过程的 TensorBoard 日志器
+            save_img (bool): 是否保存图像。默认值为 False
+            rgb2bgr (bool): 保存图像时是否将 RGB 转换为 BGR。默认值为 True
+            use_image (bool): 是否使用保存的图像来计算指标（如 PSNR、SSIM）。如果为 False，则直接使用网络输出的数据进行计算。默认值为 True
+        """
+        if self.opt['dist']:
+            return self.dist_validation(dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image)
+        else:
+            return self.nondist_validation(dataloader, current_iter, tb_logger,
+                                           save_img, rgb2bgr, use_image)
+
+    def model_ema(self, decay=0.999):
+        net_g = self.get_bare_model(self.net_g)
+
+        net_g_params = dict(net_g.named_parameters())
+        net_g_ema_params = dict(self.net_g_ema.named_parameters())
+
+        for k in net_g_ema_params.keys():
+            net_g_ema_params[k].data.mul_(decay).add_(
+                net_g_params[k].data, alpha=1 - decay)
+
+    def get_current_log(self):
+        return self.log_dict
+
+    def model_to_device(self, net):
+        """将模型加载到设备上，同时根据需要封装为 DistributedDataParallel 或 DataParallel
+
+        Args:
+            net (nn.Module)： 要加载的神经网络模型
+        """
+
+        net = net.to(self.device)
+        if self.opt['dist']:
+            find_unused_parameters = self.opt.get('find_unused_parameters',
+                                                  True)  # 默认启用未使用参数检测
+            net = DistributedDataParallel(
+                net,
+                device_ids=[torch.cuda.current_device()],
+                find_unused_parameters=find_unused_parameters)
+        elif self.opt['num_gpu'] > 1:
+            net = DataParallel(net)
+        return net
+
+    def setup_schedulers(self):
+        """Set up schedulers."""
+        train_opt = self.opt['train']
+        scheduler_type = train_opt['scheduler'].pop('type')
+        if scheduler_type in ['MultiStepLR', 'MultiStepRestartLR']:
+            for optimizer in self.optimizers:
+                self.schedulers.append(
+                    lr_scheduler.MultiStepRestartLR(optimizer,
+                                                    **train_opt['scheduler']))
+        elif scheduler_type == 'CosineAnnealingRestartLR':
+            for optimizer in self.optimizers:
+                self.schedulers.append(
+                    lr_scheduler.CosineAnnealingRestartLR(
+                        optimizer, **train_opt['scheduler']))
+        elif scheduler_type == 'CosineAnnealingWarmupRestarts':
+            for optimizer in self.optimizers:
+                self.schedulers.append(
+                    lr_scheduler.CosineAnnealingWarmupRestarts(
+                        optimizer, **train_opt['scheduler']))
+        elif scheduler_type == 'CosineAnnealingRestartCyclicLR':
+            for optimizer in self.optimizers:
+                self.schedulers.append(
+                    lr_scheduler.CosineAnnealingRestartCyclicLR(
+                        optimizer, **train_opt['scheduler']))
+        elif scheduler_type == 'TrueCosineAnnealingLR':
+            print('..', 'cosineannealingLR')
+            for optimizer in self.optimizers:
+                self.schedulers.append(
+                    torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, **train_opt['scheduler']))
+        elif scheduler_type == 'CosineAnnealingLRWithRestart':
+            print('..', 'CosineAnnealingLR_With_Restart')
+            for optimizer in self.optimizers:
+                self.schedulers.append(
+                    lr_scheduler.CosineAnnealingLRWithRestart(optimizer, **train_opt['scheduler']))
+        elif scheduler_type == 'LinearLR':
+            for optimizer in self.optimizers:
+                self.schedulers.append(
+                    lr_scheduler.LinearLR(
+                        optimizer, train_opt['total_iter']))
+        elif scheduler_type == 'VibrateLR':
+            for optimizer in self.optimizers:
+                self.schedulers.append(
+                    lr_scheduler.VibrateLR(
+                        optimizer, train_opt['total_iter']))
+        else:
+            raise NotImplementedError(
+                f'Scheduler {scheduler_type} is not implemented yet.')
+
+    def get_bare_model(self, net):
+        """Get bare model, especially under wrapping with
+        DistributedDataParallel or DataParallel.
+        """
+        if isinstance(net, (DataParallel, DistributedDataParallel)):
+            net = net.module
+        return net
+
+    @master_only
+    def print_network(self, net):
+        """Print the str and parameter number of a network.
+
+        Args:
+            net (nn.Module)
+        """
+        if isinstance(net, (DataParallel, DistributedDataParallel)):
+            net_cls_str = (f'{net.__class__.__name__} - '
+                           f'{net.module.__class__.__name__}')
+        else:
+            net_cls_str = f'{net.__class__.__name__}'
+
+        net = self.get_bare_model(net)
+        net_str = str(net)
+        net_params = sum(map(lambda x: x.numel(), net.parameters()))
+
+        logger.info(
+            f'Network: {net_cls_str}, with parameters: {net_params:,d}')
+        logger.info(net_str)
+
+    def _set_lr(self, lr_groups_l):
+        """Set learning rate for warmup.
+
+        Args:
+            lr_groups_l (list): List for lr_groups, each for an optimizer.
+        """
+        for optimizer, lr_groups in zip(self.optimizers, lr_groups_l):
+            for param_group, lr in zip(optimizer.param_groups, lr_groups):
+                param_group['lr'] = lr
+
+    def _get_init_lr(self):
+        """Get the initial lr, which is set by the scheduler.
+        """
+        init_lr_groups_l = []
+        for optimizer in self.optimizers:
+            init_lr_groups_l.append(
+                [v['initial_lr'] for v in optimizer.param_groups])
+        return init_lr_groups_l
+
+    def update_learning_rate(self, current_iter, warmup_iter=-1):
+        """Update learning rate.
+
+        Args:
+            current_iter (int): Current iteration.
+            warmup_iter (int)： Warmup iter numbers. -1 for no warmup.
+                Default： -1.
+        """
+        if current_iter > 1:
+            for scheduler in self.schedulers:
+                scheduler.step()
+        # set up warm-up learning rate
+        if current_iter < warmup_iter:
+            # get initial lr for each group
+            init_lr_g_l = self._get_init_lr()
+            # modify warming-up learning rates
+            # currently only support linearly warm up
+            warm_up_lr_l = []
+            for init_lr_g in init_lr_g_l:
+                warm_up_lr_l.append(
+                    [v / warmup_iter * current_iter for v in init_lr_g])
+            # set learning rate
+            self._set_lr(warm_up_lr_l)
+
+    def get_current_learning_rate(self):
+        return [
+            param_group['lr']
+            for param_group in self.optimizers[0].param_groups
+        ]
+
+    @master_only
+    def save_network(self, net, net_label, current_iter, param_key='params'):
+        """Save networks.
+
+        Args:
+            net (nn.Module | list[nn.Module]): Network(s) to be saved.
+            net_label (str): Network label.
+            current_iter (int): Current iter number.
+            param_key (str | list[str]): The parameter key(s) to save network.
+                Default: 'params'.
+        """
+        if current_iter == -1:
+            current_iter = 'latest'
+        save_filename = f'{net_label}_{current_iter}.pth'
+        save_path = os.path.join(self.opt['path']['models'], save_filename)
+
+        net = net if isinstance(net, list) else [net]
+        param_key = param_key if isinstance(param_key, list) else [param_key]
+        assert len(net) == len(
+            param_key), 'The lengths of net and param_key should be the same.'
+
+        save_dict = {}
+        for net_, param_key_ in zip(net, param_key):
+            net_ = self.get_bare_model(net_)
+            state_dict = net_.state_dict()
+            for key, param in state_dict.items():
+                if key.startswith('module.'):  # remove unnecessary 'module.'
+                    key = key[7:]
+                state_dict[key] = param.cpu()
+            save_dict[param_key_] = state_dict
+
+        torch.save(save_dict, save_path)
+
+    def _print_different_keys_loading(self, crt_net, load_net, strict=True):
+        """Print keys with differnet name or different size when loading models.
+
+        1. Print keys with differnet names.
+        2. If strict=False, print the same key but with different tensor size.
+            It also ignore these keys with different sizes (not load).
+
+        Args:
+            crt_net (torch model): Current network.
+            load_net (dict): Loaded network.
+            strict (bool): Whether strictly loaded. Default: True.
+        """
+        crt_net = self.get_bare_model(crt_net)
+        crt_net = crt_net.state_dict()
+        crt_net_keys = set(crt_net.keys())
+        load_net_keys = set(load_net.keys())
+
+        if crt_net_keys != load_net_keys:
+            logger.warning('Current net - loaded net:')
+            for v in sorted(list(crt_net_keys - load_net_keys)):
+                logger.warning(f'  {v}')
+            logger.warning('Loaded net - current net:')
+            for v in sorted(list(load_net_keys - crt_net_keys)):
+                logger.warning(f'  {v}')
+
+        # check the size for the same keys
+        if not strict:
+            common_keys = crt_net_keys & load_net_keys
+            for k in common_keys:
+                if crt_net[k].size() != load_net[k].size():
+                    logger.warning(
+                        f'Size different, ignore [{k}]: crt_net: '
+                        f'{crt_net[k].shape}; load_net: {load_net[k].shape}')
+                    load_net[k + '.ignore'] = load_net.pop(k)
+
+    def load_network(self, net, load_path, strict=True, param_key='params'):
+        """ 加载预训练的网络模型
+
+        Args:
+            load_path (str): 要加载的网络模型的路径
+            net (nn.Module): 网络模型实例
+            strict (bool): 是否严格加载
+            param_key (str): 加载网络时使用的参数键。如果设置为 None，则使用根路径 'path'。
+                             默认为 'params'。
+        """
+        net = self.get_bare_model(net)
+        logger.info(
+            f'Loading {net.__class__.__name__} model from {load_path}.')
+        load_net = torch.load(
+            load_path, map_location=lambda storage, loc: storage)
+        if param_key is not None:
+            if param_key not in load_net and 'params' in load_net:
+                param_key = 'params'
+                logger.info('Loading: params_ema does not exist, use params.')
+            load_net = load_net[param_key]
+        print(' load net keys', load_net.keys)
+        # remove unnecessary 'module.'
+        for k, v in deepcopy(load_net).items():
+            if k.startswith('module.'):
+                load_net[k[7:]] = v
+                load_net.pop(k)
+        self._print_different_keys_loading(net, load_net, strict)
+        net.load_state_dict(load_net, strict=strict)
+
+    @master_only
+    def save_training_state(self, epoch, current_iter, **kwargs):
+        """在训练过程中保存训练状态，以便之后可以恢复训练
+
+        Args:
+            epoch (int): 当前的训练轮次
+            current_iter (int): 当前的迭代次数
+        """
+        if current_iter != -1:
+            state = {
+                'epoch': epoch,
+                'iter': current_iter,
+                'optimizers': [],
+                'schedulers': []
+            }
+            if kwargs:
+                for k, v in kwargs.items():
+                    state[k] = v
+            for o in self.optimizers:
+                state['optimizers'].append(o.state_dict())
+            for s in self.schedulers:
+                state['schedulers'].append(s.state_dict())
+
+            # best metric
+            state['best_metric'] = kwargs['best_metric']
+            if self.opt['is_train'] and self.opt.get('use_amp', False):
+                state['amp_scaler'] = self.amp_scaler.state_dict()
+            save_filename = f'{current_iter}.state'
+            save_path = os.path.join(self.opt['path']['training_states'],
+                                     save_filename)
+            torch.save(state, save_path)
+
+    def resume_training(self, resume_state):
+        """ 为恢复训练重新加载优化器和调度器
+
+        Args:
+            resume_state (dict): 恢复训练的状态字典
+        """
+        resume_optimizers = resume_state['optimizers']
+        resume_schedulers = resume_state['schedulers']
+        assert len(resume_optimizers) == len(
+            self.optimizers), 'Wrong lengths of optimizers'
+        assert len(resume_schedulers) == len(
+            self.schedulers), 'Wrong lengths of schedulers'
+        for i, o in enumerate(resume_optimizers):
+            self.optimizers[i].load_state_dict(o)
+        for i, s in enumerate(resume_schedulers):
+            self.schedulers[i].load_state_dict(s)
+
+        # resume amp scaler
+        if self.opt['is_train'] and self.opt.get('use_amp', False):
+            if resume_state.get('amp_scaler', None):
+                self.amp_scaler.load_state_dict(resume_state['amp_scaler'])
+
+    # 损失归约
+    def reduce_loss_dict(self, loss_dict):
+        """ 减少损失字典
+
+        在分布式训练中，此函数会平均不同 GPU 之间的损失。
+
+        Args:
+            loss_dict (OrderedDict): 损失字典
+        """
+        with torch.no_grad():
+            if self.opt['dist']:
+                keys = []
+                losses = []
+                for name, value in loss_dict.items():
+                    keys.append(name)
+                    losses.append(value)
+                losses = torch.stack(losses, 0)
+                torch.distributed.reduce(losses, dst=0)
+                if self.opt['rank'] == 0:
+                    losses /= self.opt['world_size']
+                loss_dict = {key: loss for key, loss in zip(keys, losses)}
+
+            log_dict = OrderedDict()
+            for name, value in loss_dict.items():
+                log_dict[name] = value.mean().item()
+
+            return log_dict

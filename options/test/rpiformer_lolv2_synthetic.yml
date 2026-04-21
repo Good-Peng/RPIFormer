@@ -1,0 +1,41 @@
+name: rpiformer_lolv2_synthetic_test
+model_type: ImageCleanModel
+scale: 1
+num_gpu: 1
+manual_seed: 100
+use_amp: true
+
+datasets:
+  test:
+    name: LOLv2SyntheticTest
+    type: Dataset_PairedImage
+    dataroot_gt: data/LOLv2/Synthetic/Test/Normal
+    dataroot_lq: data/LOLv2/Synthetic/Test/Low
+    filename_tmpl: "{}"
+    io_backend:
+      type: disk
+
+network_g:
+  type: RPIFormer
+  in_channels: 3
+  out_channels: 3
+  n_feat: 40
+  stage: 1
+  num_blocks: [1, 2, 2]
+  lca_encoder_layers: []
+  lca_decoder_layers: []
+  use_lca_bottleneck: true
+  downsample_lca: false
+  lca_gate_init: 0.10
+  lca_gate_scale: 0.10
+  euler_cfg:
+    enable_encoder_gate: true
+    enable_decoder_gate: true
+    encoder_init_alpha: 0.06
+    decoder_init_alpha: 0.01
+    max_gate_alpha: 0.3
+
+path:
+  pretrain_network_g: ~
+  strict_load_g: true
+  resume_state: ~

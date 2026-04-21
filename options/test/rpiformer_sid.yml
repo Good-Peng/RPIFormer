@@ -1,0 +1,45 @@
+name: rpiformer_sid_test
+model_type: ImageCleanModel
+scale: 1
+num_gpu: 1
+manual_seed: 100
+use_amp: true
+
+datasets:
+  test:
+    name: SIDTest
+    type: Dataset_SIDImage
+    dataroot_gt: data/SID/long_sid2
+    dataroot_lq: data/SID/short_sid2
+    io_backend:
+      type: disk
+    cache_data: true
+    N_frames: 5
+    train_size: [960, 512]
+    use_flip: false
+    use_rot: false
+
+network_g:
+  type: RPIFormer
+  in_channels: 3
+  out_channels: 3
+  n_feat: 40
+  stage: 1
+  num_blocks: [1, 2, 2]
+  lca_encoder_layers: [1]
+  lca_decoder_layers: [0]
+  use_lca_bottleneck: true
+  downsample_lca: true
+  lca_gate_init: 0.08
+  lca_gate_scale: 0.10
+  euler_cfg:
+    enable_encoder_gate: true
+    enable_decoder_gate: true
+    encoder_init_alpha: 0.06
+    decoder_init_alpha: 0.01
+    max_gate_alpha: 0.2
+
+path:
+  pretrain_network_g: ~
+  strict_load_g: true
+  resume_state: ~
