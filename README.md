@@ -28,7 +28,38 @@ pip install -r requirements.txt
 Create a `data/` directory in the repository root, then download the datasets from [Baidu Netdisk](https://pan.baidu.com/s/1Lmv9VQ-7Wu3LwXrqzL6v4Q?pwd=gi1s).
 
 - Extraction code: `gi1s`
-- Dataset paths should match the paths defined in `options/train/*.yml` and `options/test/*.yml`
+
+Please organize the datasets as follows:
+
+```text
+RPIFormer/
+└── data/
+    ├── LOLv1/
+    │   ├── Train/
+    │   │   ├── input/
+    │   │   └── target/
+    │   └── Test/
+    │       ├── input/
+    │       └── target/
+    ├── LOLv2/
+    │   ├── Real_captured/
+    │   │   ├── Train/
+    │   │   │   ├── Low/
+    │   │   │   └── Normal/
+    │   │   └── Test/
+    │   │       ├── Low/
+    │   │       └── Normal/
+    │   └── Synthetic/
+    │       ├── Train/
+    │       │   ├── Low/
+    │       │   └── Normal/
+    │       └── Test/
+    │           ├── Low/
+    │           └── Normal/
+    └── SID/
+        ├── short_sid2/
+        └── long_sid2/
+```
 
 ## Pretrained Models
 
