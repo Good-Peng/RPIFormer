@@ -4,6 +4,8 @@ This repository contains the official implementation of the manuscript **Progres
 
 This manuscript is currently under submission to **The Visual Computer (TVC)**.
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19682188.svg)](https://doi.org/10.5281/zenodo.19682188)
+
 ![Framework](framework.png)
 
 ## Environment Setup
