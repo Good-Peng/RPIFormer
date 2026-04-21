@@ -10,7 +10,6 @@ def ordered_yaml():
         from yaml import CLoader as Loader
     except ImportError:
         from yaml import Dumper, Loader
-
     mapping_tag = yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG
 
     def dict_representer(dumper, data):
@@ -21,7 +20,7 @@ def ordered_yaml():
 
     Dumper.add_representer(OrderedDict, dict_representer)
     Loader.add_constructor(mapping_tag, dict_constructor)
-    return Loader, Dumper
+    return (Loader, Dumper)
 
 
 def parse(opt_path, is_train=True):
@@ -29,16 +28,13 @@ def parse(opt_path, is_train=True):
     with open(opt_path, mode="r", encoding="utf-8") as file_obj:
         loader, _ = ordered_yaml()
         opt = yaml.load(file_obj, Loader=loader)
-
     opt["is_train"] = is_train
     opt.setdefault("dist", False)
     opt.setdefault("rank", 0)
     opt.setdefault("world_size", 1)
     opt.setdefault("manual_seed", 100)
     opt.setdefault("use_amp", False)
-
     opt["name"] = osp.basename(opt_path).split(".")[0]
-
     for phase, dataset in opt["datasets"].items():
         phase = phase.split("_")[0]
         dataset["phase"] = phase
@@ -48,13 +44,12 @@ def parse(opt_path, is_train=True):
             dataset["dataroot_gt"] = osp.expanduser(dataset["dataroot_gt"])
         if dataset.get("dataroot_lq") is not None:
             dataset["dataroot_lq"] = osp.expanduser(dataset["dataroot_lq"])
-
     for key, val in opt["path"].items():
         if val is not None and ("resume_state" in key or "pretrain_network" in key):
             opt["path"][key] = osp.expanduser(val)
-
-    opt["path"]["root"] = osp.abspath(osp.join(__file__, osp.pardir, osp.pardir, osp.pardir))
-
+    opt["path"]["root"] = osp.abspath(
+        osp.join(__file__, osp.pardir, osp.pardir, osp.pardir)
+    )
     if is_train:
         experiments_root = osp.join(opt["path"]["root"], "experiments", opt["name"])
         opt["path"]["experiments_root"] = experiments_root
@@ -62,7 +57,6 @@ def parse(opt_path, is_train=True):
         opt["path"]["training_states"] = osp.join(experiments_root, "training_states")
         opt["path"]["log"] = experiments_root
         opt["path"]["visualization"] = osp.join(experiments_root, "visualization")
-
         if "debug" in opt["name"]:
             if "val" in opt:
                 opt["val"]["val_freq"] = 8
@@ -73,7 +67,6 @@ def parse(opt_path, is_train=True):
         opt["path"]["results_root"] = results_root
         opt["path"]["log"] = results_root
         opt["path"]["visualization"] = osp.join(results_root, "visualization")
-
     return opt
 
 

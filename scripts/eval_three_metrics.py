@@ -8,12 +8,9 @@ from typing import Dict, Iterable, List, Optional, Tuple
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-
 import cv2
 import numpy as np
-
 from basicsr.metrics import calculate_lpips, calculate_psnr, calculate_ssim
-
 
 IMG_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp", ".npy"}
 
@@ -43,7 +40,6 @@ def _imread_any(path: Path) -> np.ndarray:
         if arr.ndim == 3 and arr.shape[2] > 3:
             arr = arr[:, :, :3]
         return arr
-
     img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
     if img is None:
         raise ValueError(f"Failed to read image: {path}")
@@ -54,7 +50,9 @@ def _imread_any(path: Path) -> np.ndarray:
     return img
 
 
-def _build_gt_index(gt_root: Path, recursive: bool) -> Tuple[Dict[str, Path], Dict[str, List[Path]]]:
+def _build_gt_index(
+    gt_root: Path, recursive: bool
+) -> Tuple[Dict[str, Path], Dict[str, List[Path]]]:
     rel_index: Dict[str, Path] = {}
     stem_index: Dict[str, List[Path]] = {}
     for p in _iter_files(gt_root, recursive=recursive):
@@ -63,25 +61,20 @@ def _build_gt_index(gt_root: Path, recursive: bool) -> Tuple[Dict[str, Path], Di
         rel = str(p.relative_to(gt_root)).replace("\\", "/")
         rel_index[rel] = p
         stem_index.setdefault(p.stem, []).append(p)
-    return rel_index, stem_index
+    return (rel_index, stem_index)
 
 
 def _pair_files(
-    pred_root: Path,
-    gt_root: Path,
-    recursive: bool,
-    match: str,
+    pred_root: Path, gt_root: Path, recursive: bool, match: str
 ) -> List[Pair]:
     rel_index, stem_index = _build_gt_index(gt_root, recursive=recursive)
     pairs: List[Pair] = []
     missing: List[Path] = []
-
     for pred in _iter_files(pred_root, recursive=recursive):
         if not _is_valid_image(pred):
             continue
         rel = str(pred.relative_to(pred_root)).replace("\\", "/")
         gt: Optional[Path] = None
-
         if match in ("relative", "auto"):
             gt = rel_index.get(rel)
         if gt is None and match in ("stem", "auto"):
@@ -89,28 +82,26 @@ def _pair_files(
             candidates = stem_index.get(pred_key, [])
             if len(candidates) == 1:
                 gt = candidates[0]
-
         if gt is None:
             missing.append(pred)
             continue
         pairs.append(Pair(pred=pred, gt=gt))
-
     if missing:
-        sample = "\n".join(str(p) for p in missing[:10])
+        sample = "\n".join((str(p) for p in missing[:10]))
         raise ValueError(
-            f"Failed to find GT for {len(missing)} predicted files. "
-            f"Match mode={match}. Sample:\n{sample}"
+            f"Failed to find GT for {len(missing)} predicted files. Match mode={match}. Sample:\n{sample}"
         )
-
     if not pairs:
-        raise ValueError(f"No image pairs found under pred_root={pred_root} and gt_root={gt_root}.")
+        raise ValueError(
+            f"No image pairs found under pred_root={pred_root} and gt_root={gt_root}."
+        )
     return sorted(pairs, key=lambda x: str(x.pred))
 
 
 def _maybe_resize_to_gt(pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
     if pred.shape == gt.shape:
         return pred
-    gt_h, gt_w = gt.shape[0], gt.shape[1]
+    gt_h, gt_w = (gt.shape[0], gt.shape[1])
     pred_resized = cv2.resize(pred, (gt_w, gt_h), interpolation=cv2.INTER_CUBIC)
     if pred_resized.ndim == 2:
         pred_resized = pred_resized[..., None]
@@ -120,9 +111,7 @@ def _maybe_resize_to_gt(pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
 
 
 def _bgr_to_rgb(img: np.ndarray) -> np.ndarray:
-    # Most OpenCV images are BGR; LPIPS expects RGB conventionally.
     if img.ndim == 3 and img.shape[2] == 3:
-        # ::-1 creates a view with negative stride; torch.from_numpy cannot handle it.
         return img[:, :, ::-1].copy()
     return img
 
@@ -137,8 +126,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compute PSNR/SSIM/LPIPS between a folder of predictions and GT using BasicSR metrics."
     )
-    parser.add_argument("--pred", type=str, required=True, help="Folder containing predicted images.")
-    parser.add_argument("--gt", type=str, required=True, help="Folder containing GT images.")
+    parser.add_argument(
+        "--pred", type=str, required=True, help="Folder containing predicted images."
+    )
+    parser.add_argument(
+        "--gt", type=str, required=True, help="Folder containing GT images."
+    )
     parser.add_argument(
         "--match",
         type=str,
@@ -164,9 +157,15 @@ def main() -> None:
         default="",
         help="Exclude predicted files whose stem ends with this suffix (e.g. '_gt' in BasicSR visualization).",
     )
-    parser.add_argument("--recursive", action="store_true", help="Recursively search pred/gt folders.")
-    parser.add_argument("--crop-border", type=int, default=0, help="Crop border pixels on each side.")
-    parser.add_argument("--test-y-channel", action="store_true", help="Compute on Y channel (YCbCr).")
+    parser.add_argument(
+        "--recursive", action="store_true", help="Recursively search pred/gt folders."
+    )
+    parser.add_argument(
+        "--crop-border", type=int, default=0, help="Crop border pixels on each side."
+    )
+    parser.add_argument(
+        "--test-y-channel", action="store_true", help="Compute on Y channel (YCbCr)."
+    )
     parser.add_argument(
         "--input-order",
         type=str,
@@ -184,26 +183,26 @@ def main() -> None:
         action="store_true",
         help="By default, convert BGR->RGB before LPIPS (recommended). Set this to keep BGR as-is.",
     )
-    parser.add_argument("--out-csv", type=str, default="", help="Optional CSV output path.")
+    parser.add_argument(
+        "--out-csv", type=str, default="", help="Optional CSV output path."
+    )
     args = parser.parse_args()
-
     pred_root = Path(args.pred).expanduser().resolve()
     gt_root = Path(args.gt).expanduser().resolve()
     if not pred_root.exists():
         raise FileNotFoundError(pred_root)
     if not gt_root.exists():
         raise FileNotFoundError(gt_root)
-
-    # Build GT indices with optional file filtering and stem normalization.
-    rel_index_raw, stem_index_raw_all = _build_gt_index(gt_root, recursive=args.recursive)
+    rel_index_raw, stem_index_raw_all = _build_gt_index(
+        gt_root, recursive=args.recursive
+    )
     rel_index: Dict[str, Path] = {}
     stem_index_raw: Dict[str, List[Path]] = {}
     for rel, p in rel_index_raw.items():
-        if args.gt_file_suffix and not p.stem.endswith(args.gt_file_suffix):
+        if args.gt_file_suffix and (not p.stem.endswith(args.gt_file_suffix)):
             continue
         rel_index[rel] = p
         stem_index_raw.setdefault(p.stem, []).append(p)
-
     if args.gt_stem_suffix:
         stem_index: Dict[str, List[Path]] = {}
         for stem, paths in stem_index_raw.items():
@@ -216,7 +215,9 @@ def main() -> None:
             for pred in _iter_files(pred_root, recursive=args.recursive):
                 if not _is_valid_image(pred):
                     continue
-                if args.pred_exclude_stem_suffix and pred.stem.endswith(args.pred_exclude_stem_suffix):
+                if args.pred_exclude_stem_suffix and pred.stem.endswith(
+                    args.pred_exclude_stem_suffix
+                ):
                     continue
                 rel = str(pred.relative_to(pred_root)).replace("\\", "/")
                 gt: Optional[Path] = None
@@ -230,27 +231,29 @@ def main() -> None:
                     missing.append(pred)
                     continue
                 pairs.append(Pair(pred=pred, gt=gt))
-
             if missing:
-                sample = "\n".join(str(p) for p in missing[:10])
+                sample = "\n".join((str(p) for p in missing[:10]))
                 raise ValueError(
-                    f"Failed to find GT for {len(missing)} predicted files. "
-                    f"Match mode={args.match}. Sample:\n{sample}"
+                    f"Failed to find GT for {len(missing)} predicted files. Match mode={args.match}. Sample:\n{sample}"
                 )
             if not pairs:
-                raise ValueError(f"No image pairs found under pred_root={pred_root} and gt_root={gt_root}.")
+                raise ValueError(
+                    f"No image pairs found under pred_root={pred_root} and gt_root={gt_root}."
+                )
             return sorted(pairs, key=lambda x: str(x.pred))
 
         pairs = pair_files_with_custom_stem()
     else:
-        # No stem normalization; still respect gt_file_suffix and pred exclude.
+
         def pair_files_simple() -> List[Pair]:
             pairs: List[Pair] = []
             missing: List[Path] = []
             for pred in _iter_files(pred_root, recursive=args.recursive):
                 if not _is_valid_image(pred):
                     continue
-                if args.pred_exclude_stem_suffix and pred.stem.endswith(args.pred_exclude_stem_suffix):
+                if args.pred_exclude_stem_suffix and pred.stem.endswith(
+                    args.pred_exclude_stem_suffix
+                ):
                     continue
                 rel = str(pred.relative_to(pred_root)).replace("\\", "/")
                 gt: Optional[Path] = None
@@ -264,32 +267,31 @@ def main() -> None:
                     missing.append(pred)
                     continue
                 pairs.append(Pair(pred=pred, gt=gt))
-
             if missing:
-                sample = "\n".join(str(p) for p in missing[:10])
+                sample = "\n".join((str(p) for p in missing[:10]))
                 raise ValueError(
-                    f"Failed to find GT for {len(missing)} predicted files. "
-                    f"Match mode={args.match}. Sample:\n{sample}"
+                    f"Failed to find GT for {len(missing)} predicted files. Match mode={args.match}. Sample:\n{sample}"
                 )
             if not pairs:
-                raise ValueError(f"No image pairs found under pred_root={pred_root} and gt_root={gt_root}.")
+                raise ValueError(
+                    f"No image pairs found under pred_root={pred_root} and gt_root={gt_root}."
+                )
             return sorted(pairs, key=lambda x: str(x.pred))
 
         pairs = pair_files_simple()
-
     rows: List[Dict[str, object]] = []
     psnr_sum = 0.0
     ssim_sum = 0.0
     lpips_sum = 0.0
-
     for i, pair in enumerate(pairs, start=1):
         pred = _imread_any(pair.pred)
         gt = _imread_any(pair.gt)
         if args.resize_to_gt:
             pred = _maybe_resize_to_gt(pred, gt)
         if pred.shape != gt.shape:
-            raise ValueError(f"Shape mismatch for:\n  pred={pair.pred} {pred.shape}\n  gt={pair.gt} {gt.shape}")
-
+            raise ValueError(
+                f"Shape mismatch for:\n  pred={pair.pred} {pred.shape}\n  gt={pair.gt} {gt.shape}"
+            )
         psnr = calculate_psnr(
             pred,
             gt,
@@ -311,13 +313,11 @@ def main() -> None:
             gt_lpips,
             crop_border=args.crop_border,
             input_order=args.input_order,
-            test_y_channel=False,  # keep default to match BasicSR usage
+            test_y_channel=False,
         )
-
         psnr_sum += float(psnr)
         ssim_sum += float(ssim)
         lpips_sum += float(lpips)
-
         rel_pred = str(pair.pred.relative_to(pred_root)).replace("\\", "/")
         rel_gt = str(pair.gt.relative_to(gt_root)).replace("\\", "/")
         rows.append(
@@ -330,24 +330,24 @@ def main() -> None:
                 "lpips": float(lpips),
             }
         )
-
         if i % 50 == 0 or i == len(pairs):
-            print(f"[{i}/{len(pairs)}] psnr={psnr_sum/i:.4f} ssim={ssim_sum/i:.6f} lpips={lpips_sum/i:.4f}")
-
+            print(
+                f"[{i}/{len(pairs)}] psnr={psnr_sum / i:.4f} ssim={ssim_sum / i:.6f} lpips={lpips_sum / i:.4f}"
+            )
     mean_psnr = psnr_sum / len(pairs)
     mean_ssim = ssim_sum / len(pairs)
     mean_lpips = lpips_sum / len(pairs)
-
     print("==== Mean ====")
     print(f"PSNR : {mean_psnr:.4f}")
     print(f"SSIM : {mean_ssim:.6f}")
     print(f"LPIPS: {mean_lpips:.4f}")
-
     if args.out_csv:
         out_path = Path(args.out_csv).expanduser().resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["name", "pred", "gt", "psnr", "ssim", "lpips"])
+            writer = csv.DictWriter(
+                f, fieldnames=["name", "pred", "gt", "psnr", "ssim", "lpips"]
+            )
             writer.writeheader()
             writer.writerows(rows)
             writer.writerow(

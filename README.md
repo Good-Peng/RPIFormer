@@ -35,32 +35,32 @@ Please organize the datasets as follows:
 
 ```text
 RPIFormer/
-└── data/
-    ├── LOLv1/
-    │   ├── Train/
-    │   │   ├── input/
-    │   │   └── target/
-    │   └── Test/
-    │       ├── input/
-    │       └── target/
-    ├── LOLv2/
-    │   ├── Real_captured/
-    │   │   ├── Train/
-    │   │   │   ├── Low/
-    │   │   │   └── Normal/
-    │   │   └── Test/
-    │   │       ├── Low/
-    │   │       └── Normal/
-    │   └── Synthetic/
-    │       ├── Train/
-    │       │   ├── Low/
-    │       │   └── Normal/
-    │       └── Test/
-    │           ├── Low/
-    │           └── Normal/
-    └── SID/
-        ├── short_sid2/
-        └── long_sid2/
+`-- data/
+    |-- LOLv1/
+    |   |-- Train/
+    |   |   |-- input/
+    |   |   `-- target/
+    |   `-- Test/
+    |       |-- input/
+    |       `-- target/
+    |-- LOLv2/
+    |   |-- Real_captured/
+    |   |   |-- Train/
+    |   |   |   |-- Low/
+    |   |   |   `-- Normal/
+    |   |   `-- Test/
+    |   |       |-- Low/
+    |   |       `-- Normal/
+    |   `-- Synthetic/
+    |       |-- Train/
+    |       |   |-- Low/
+    |       |   `-- Normal/
+    |       `-- Test/
+    |           |-- Low/
+    |           `-- Normal/
+    `-- SID/
+        |-- short_sid2/
+        `-- long_sid2/
 ```
 
 ## Pretrained Models
